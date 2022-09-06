@@ -1,8 +1,4 @@
 Playing around with [[https://github.com/rfordatascience/tidytuesday][tidytuesday]]
 
 * Showcase
-<<<<<<< HEAD
--
-=======
->>>>>>> 1abfe6f (fix link gh rendering)
 - [[file:20220712_flights/README.pdf][20220712 - Flights: Time Series, GIS]]

@@ -1,4 +1,5 @@
 Playing around with [[https://github.com/rfordatascience/tidytuesday][tidytuesday]]
 
 * Showcase
-- file:20220712_flights/README.pdf
+-
+- [[file:20220712_flights/README.pdf][20220712 - Flights: Time Series, GIS]]

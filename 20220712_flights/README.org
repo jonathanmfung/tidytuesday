@@ -1,0 +1,469 @@
+#+TITLE: Flights
+#+DATE: 07/12/22
+#+AUTHOR: Jonathan Fung
+#+PROPERTY: header-args:R :session *tidytuesday*
+#+OPTIONS: ^:nil
+#+LATEX_CLASS: notes
+#+LATEX_HEADER: \usepackage{fontspec}
+#+LATEX_HEADER: \setmainfont[]{IBM Plex Sans}
+#+LATEX_HEADER: \setmonofont[]{Iosevka SS14}
+
+#+begin_latex
+\pagebreak
+#+end_latex
+* Import
+Source: [[https://github.com/rfordatascience/tidytuesday/tree/master/data/2022/2022-07-12][tidytuesday - July 12, 2022]]
+
+#+begin_src R :exports both
+library(tidyverse)
+library(fpp3)
+tuesdata <- tidytuesdayR::tt_load('2022-07-12')
+flights <- tuesdata$flights
+
+names(flights)
+#+end_src
+
+#+RESULTS:
+| YEAR          |
+| MONTH_NUM     |
+| MONTH_MON     |
+| FLT_DATE      |
+| APT_ICAO      |
+| APT_NAME      |
+| STATE_NAME    |
+| FLT_DEP_1     |
+| FLT_ARR_1     |
+| FLT_TOT_1     |
+| FLT_DEP_IFR_2 |
+| FLT_ARR_IFR_2 |
+| FLT_TOT_IFR_2 |
+| Pivot Label   |
+
+This dataset is a daily time series on each airport, with each record having total IFR movement, departures, and arrivals, from both "Network Manager" (1) and "Airport Operator" (2).
+
+#+begin_src R :exports both
+head(flights[,1:8])
+#+end_src
+
+#+RESULTS:
+| 2016 | 1 | JAN | 2016-01-01 | EBAW | Antwerp              | Belgium |   4 |
+| 2016 | 1 | JAN | 2016-01-01 | EBBR | Brussels             | Belgium | 174 |
+| 2016 | 1 | JAN | 2016-01-01 | EBCI | Charleroi            | Belgium |  45 |
+| 2016 | 1 | JAN | 2016-01-01 | EBLG | Liège                | Belgium |   6 |
+| 2016 | 1 | JAN | 2016-01-01 | EBOS | Ostend-Bruges        | Belgium |   7 |
+| 2016 | 1 | JAN | 2016-01-01 | EDDB | Berlin - Brandenburg | Germany |  98 |
+#+begin_latex
+\pagebreak
+#+end_latex
+* Utils
+Define =assignRegion=, using the [[https://en.wikipedia.org/wiki/Regions_of_Europe][CIA - The World Factbook]] to assign European regions to states. Also define =cleanState=, which cleans up some state names to work with the =rlnaturalearth= package.
+
+#+begin_src R :results none :exports none
+assignRegion <- function (s) {
+  region <- case_when(
+s == "Belgium" ~ "Western Europe",
+s == "Germany" ~ "Central Europe",
+s == "Estonia" ~ "Eastern Europe",
+s == "Finland" ~ "Northern Europe",
+s == "United Kingdom" ~ "Western Europe",
+s == "Netherlands" ~ "Western Europe",
+s == "Ireland" ~ "Western Europe",
+s == "Denmark" ~ "Northern Europe",
+s == "Luxembourg" ~ "Western Europe",
+s == "Norway" ~ "Northern Europe",
+s == "Poland" ~ "Central Europe",
+s == "Sweden" ~ "Northern Europe",
+s == "Latvia" ~ "Eastern Europe",
+s == "Lithuania" ~ "Eastern Europe",
+s == "Spain" ~ "South-western Europe",
+s == "Albania" ~ "South-eastern Europe",
+s == "Bulgaria" ~ "South-eastern Europe",
+s == "Cyprus" ~ "Southern Europe",
+s == "Croatia" ~ "South-eastern Europe",
+s == "France" ~ "Western Europe",
+s == "Greece" ~ "Southern Europe",
+s == "Hungary" ~ "Central Europe",
+s == "Italy" ~ "Southern Europe",
+s == "Slovenia" ~ "Central Europe",
+s == "Czech Republic" ~ "Central Europe",
+s == "Malta" ~ "Southern Europe",
+s == "Austria" ~ "Central Europe",
+s == "Portugal" ~ "South-western Europe",
+s == "Bosnia and Herzegovina" ~ "South-eastern Europe",
+s == "Romania" ~ "South-eastern Europe",
+s == "Switzerland" ~ "Central Europe",
+s == "Türkiye" ~ "Not Europe", # Middle East
+s == "Moldova" ~ "Eastern Europe",
+s == "Republic of North Macedonia" ~ "South-eastern Europe",
+s == "Serbia" ~ "South-eastern Europe",
+s == "Montenegro" ~ "South-eastern Europe",
+s == "Slovakia" ~ "Central Europe",
+s == "Armenia" ~ "Not Europe", # Caucasus
+s == "Georgia" ~ "Not Europe", # Caucasus
+s == "Ukraine" ~ "Eastern Europe",
+s == "Morocco" ~ "Not Europe", # Caucasus
+s == "Israel" ~ "Not Europe" # Middle East
+              )
+  return(region)
+}
+
+
+# Convert STATE_NAMEs format in flights to work with rnaturalearth
+cleanState <- function (s) {
+  state <- case_when(
+s == "Bosnia and Herzegovina" ~ "Bosnia and Herz.",
+s == "Czech Republic" ~ "Czech Rep.",
+s == "Republic of North Macedonia" ~ "Macedonia",
+s == "Türkiye" ~ "Turkey",
+TRUE ~ s
+              )
+  return(state)
+}
+#+end_src
+
+#+begin_src R :noeval
+assignRegion <- function (s) {
+  region <- case_when(
+s == "Belgium" ~ "Western Europe",
+#...
+s == "Israel" ~ "Not Europe" # Middle East
+              )
+  return(region)
+}
+
+
+# Convert STATE_NAMEs format in flights to work with rnaturalearth
+cleanState <- function (s) {
+  state <- case_when(
+s == "Bosnia and Herzegovina" ~ "Bosnia and Herz.",
+#...
+s == "Türkiye" ~ "Turkey",
+TRUE ~ s
+              )
+  return(state)
+}
+#+end_src
+
+#+begin_src R :exports both :results output
+assignRegion("Netherlands")
+cleanState("Czech Republic")
+#+end_src
+
+#+RESULTS:
+: [1] "Western Europe"
+: [1] "Czech Rep."
+
+#+begin_latex
+\pagebreak
+#+end_latex
+* Explore
+
+The huge dip in the beginning of 2020 is when the COVID-19 Pandemic lockdowns started to hit the world. Before that, we see a pretty consistent seasonality. After, there is still seasonality, but with significant growth trends. The order across regions also persists during the pandemic.
+
+#+begin_src R :results graphics file :file ./media/tot_region.png :width 800 :res 100 :exports both
+by_region <- flights %>%
+  mutate(region = assignRegion(STATE_NAME)) %>%
+  group_by(FLT_DATE, region) %>%
+  summarise(tot = sum(FLT_TOT_1), .groups = "keep") %>%
+  mutate(FLT_DATE = as.Date(FLT_DATE)) %>%
+  as_tsibble(key = region, index = FLT_DATE)
+
+## https://dcl-data-vis.stanford.edu/time-series.html#one-response-variable
+by_region %>% autoplot(tot) +
+  geom_text(aes(label = region),
+            data = by_region %>% filter(FLT_DATE == "2022-05-31"),
+            color = "black",
+            hjust = 0,
+            size = 3,
+            nudge_x = 5,
+            angle = 40) +
+  xlab("Day") + ylab("Sum of daily total IFR movements") +
+  ggtitle("Plot by Region") +
+  scale_x_date(limits = as.Date(c("2016-01-01", "2023-02-01"))) +
+  theme(legend.text=element_text(size=6),
+        legend.position="none")
+#+end_src
+
+#+RESULTS:
+[[file:./media/tot_region.png]]
+
+#+begin_latex
+\pagebreak
+#+end_latex
+
+For clarity, we can view the same data, but summed over regions.
+
+#+begin_src R :results graphics file :file ./media/tot_sum.png :width 800 :res 100 :exports both
+TOT_sum <- flights %>%
+  group_by(FLT_DATE) %>%
+  summarise(tot = sum(FLT_TOT_1)) %>%
+  mutate(FLT_DATE = as.Date(FLT_DATE)) %>%
+  as_tsibble(index = FLT_DATE)
+
+TOT_sum %>% autoplot(tot) +
+  xlab("Day") + ylab("Sum of daily total IFR movements") +
+  ggtitle("Sum of total IFR movements")
+#+end_src
+
+#+RESULTS:
+[[file:./media/tot_sum.png]]
+
+#+begin_latex
+\pagebreak
+#+end_latex
+
+STL Decomposition clearly shows that this data exhibits trend, year-seasonality, and week-seasonality. Non-patterns are caught in the /remainder/, especially the large dip during the start of COVID-19.
+
+#+begin_src R :results graphics file :file ./media/tot_sum_decomp.png :width 800 :res 100 :exports both
+TOT_sum %>%
+  model(stl = STL(tot)) %>%
+  components() %>% autoplot() + xlab("Day") +
+  ggtitle("STL Decomposition")
+#+end_src
+
+#+RESULTS:
+[[file:./media/tot_sum_decomp.png]]
+
+#+begin_comment
+TODO May also want to explore aggregating by month, to see quarterly trends
+#+end_comment
+
+#+begin_latex
+\pagebreak
+#+end_latex
+* Inference
+STL decomposition also allows us to look at behavior a time series exhibits, particularly seasonality and how strong it trends.
+
+#+begin_src R :results graphics file :file ./media/feat_region.png :height 300 :width 600 :res 100 :exports both
+by_region %>%
+  features(tot, feat_stl) %>%
+  ggplot(aes(x = trend_strength,
+             y = seasonal_strength_week,
+             col = region)) +
+  geom_point(size = 4) +
+  ggtitle("Weekly Seasonality  vs Trend Strength by region")
+#+end_src
+
+#+RESULTS:
+[[file:./media/feat_region.png]]
+
+#+begin_latex
+\pagebreak
+#+end_latex
+
+This can also be applied to every state:
+
+#+begin_src R :results graphics file :file ./media/feat_state.png :height 800 :width 800 :res 100 :exports both
+# https://stackoverflow.com/questions/30372368/adding-empty-graphs-to-facet-wrap-in-ggplot2
+feats_state <- flights %>%
+  group_by(FLT_DATE, STATE_NAME) %>%
+  summarise(tot = sum(FLT_TOT_1), .groups = "keep") %>%
+  mutate(FLT_DATE = as.Date(FLT_DATE)) %>%
+  as_tsibble(key = STATE_NAME, index = FLT_DATE) %>%
+  features(tot, feat_stl) %>%
+  mutate(georegion = assignRegion(STATE_NAME)) %>%
+  mutate(STATE_NAME = cleanState(STATE_NAME))
+
+feats_state %>%
+  ggplot(aes(x = trend_strength,
+             y = seasonal_strength_week,
+             label = STATE_NAME)) +
+  ggtitle("Features - By State, faceting on Region") +
+  geom_point() +
+  geom_text(size = 2.5, hjust = 0, nudge_x = 0.001) +
+  facet_wrap(.~factor(georegion,
+                      # order levels to spatially arange facets
+                      levels=c('', 'Northern Europe', 'Not Europe',
+                               'Western Europe', 'Central Europe', 'Eastern Europe',
+                               'South-western Europe', 'Southern Europe', 'South-eastern Europe')),
+             drop=FALSE)
+
+#+end_src
+
+#+RESULTS:
+[[file:./media/feat_state.png]]
+
+All states have a fairly high trend-strength, never less than src_R{min(feats_state$trend_strength) %>% round(2)} {{{results(=0.94=)}}}. On the other hand, Northern, Western, and Central Europe have high weekly seasonality.
+
+#+begin_latex
+\pagebreak
+#+end_latex
+* GIS
+#+CAPTION: Need to install some libraries for =sf=:
+#+begin_src sh :eval no :exports none
+yay udunits
+pacman -S libtiff # needed for gdal
+pacman -S gdal
+#+end_src
+
+The previous result can be visualized using some GIS libraries.
+
+#+begin_src R :results none
+library("sf")
+library("rnaturalearth")
+library("rnaturalearthdata")
+#+end_src
+
+#+begin_src R :results graphics file :file ./media/feat_gis.png :height 800 :width 800 :res 100 :exports both
+# "name" is rnaturalearth refers to a country
+feats_state_gis <- feats_state %>% rename(name = STATE_NAME)
+
+earth <- ne_countries(scale = "medium", returnclass = "sf")
+eu <- right_join(earth, feats_state_gis, by = "name")
+eu_coords = data.frame(name = eu$name, st_coordinates(st_centroid(eu)))
+
+ggplot(eu) +
+  # relevant: trend_strength, seasonal_strength_week, linearity, curvature
+  geom_sf(aes(fill = seasonal_strength_week)) +
+  geom_label(data = eu_coords, aes(x=X, y=Y, label = name), size = 2, alpha = 0.5) +
+  coord_sf(xlim = c(-17, 45), ylim = c(22, 70)) + # 78 <> 70 to cut off top off Norway (Svalbard)
+  ggtitle("Mapped Features") +
+  theme(legend.position = c(1,0),
+        legend.justification = c(1,0),
+        legend.box.margin = margin(5, r = 5, b = 5, unit = "mm"),
+        legend.direction = "horizontal",
+        plot.title = element_text(vjust = -10, hjust = 0.5, size = 16)
+        )
+#+end_src
+
+#+RESULTS:
+[[file:./media/feat_gis.png]]
+
+** References
+- [[https://r-spatial.org/r/2018/10/25/ggplot2-sf.html][Drawing beautiful maps programmatically with R, sf and ggplot2 — Part 1: Basics]]
+
+  #+begin_latex
+\pagebreak
+#+end_latex
+* Forecasting
+
+For fun, we can build 3 /ARIMA/ models, on data before the lockdowns (< March 2020), after/during (> April 2020), and overall. Box-Cox transformations will also be applied to stabilize results. Forecasts are calculated for half a year.
+
+#+begin_src R :results graphics file :file ./media/arima.png :width 900 :res 100 :exports both
+lambda_bef <- TOT_sum %>%
+  filter_index(. ~ "2020-02") %>%
+  features(tot, features = guerrero) %>% pull(lambda_guerrero)
+lambda_dur <- TOT_sum %>%
+  filter_index("2020-04" ~ .) %>%
+  features(tot, features = guerrero) %>% pull(lambda_guerrero)
+lambda_ovr <- TOT_sum %>%
+  features(tot, features = guerrero) %>% pull(lambda_guerrero)
+
+H <- 180
+
+before <- TOT_sum %>% filter_index(. ~ "2020-02") %>%
+  model("Before Pandemic" = ARIMA(box_cox(tot, lambda_bef))) %>% forecast(h = H)
+during <- TOT_sum %>% filter_index("2020-04" ~ .) %>%
+  model("During Pandemic" = ARIMA(box_cox(tot, lambda_dur))) %>% forecast(h = H)
+overall <- TOT_sum %>%
+  model("Overall" = ARIMA(box_cox(tot, lambda_ovr))) %>% forecast(h = H)
+
+bind_rows(during, before, overall) %>%
+  autoplot(TOT_sum, level = 89, alpha = 0.5) +
+  xlab("Day") + ylab("Sum of daily total IFR movements") +
+    ggtitle("Various ARIMA Forecasts (w/ 89% Prediction Intervals, Box-Cox)") +
+  theme(legend.position = c(1,0),
+        legend.justification = c(1, 0),
+        legend.box.margin = margin(5, r = 5, b = 5, unit = "mm"),
+        plot.title = element_text(vjust = -10, hjust = 0.5, size = 16)
+        ) + guides(level = "none")
+#+end_src
+
+#+RESULTS:
+[[file:./media/arima.png]]
+
+As expected, the =during= model has a high trend, due to the world bouncing back. Heuristically, =during= would not be a very suitable model as it overshoots the values before lockdowns. However, the future is uncertain, and even the prediction intervals on =overall= capture higher-than-before values.
+* Excess :noexport:
+** Explore
+#+begin_src R :exports none :noeval
+naidx <- is.na(flights$FLT_DEP_IFR_2)
+cor(flights$FLT_DEP_1[!naidx], flights$FLT_DEP_IFR_2[!naidx])
+#+end_src
+
+#+RESULTS:
+: 0.99889797570022
+
+#+begin_src R :results none :noeval
+flights_EDDC <-
+  flights[flights$APT_ICAO == "EDDC",] %>%
+  ## FLT_DATE is a date-time object, need to be only date for daily interval
+  mutate(FLT_DATE = as.Date(FLT_DATE)) %>% as_tsibble()
+
+flights_ts <-
+  flights %>%
+  mutate(region = assignRegion(STATE_NAME)) %>%
+  mutate(FLT_DATE = as.Date(FLT_DATE)) %>%
+  as_tsibble(key = APT_ICAO, index = FLT_DATE)
+#+end_src
+
+#+CAPTION: Plot of FLT_TOT_1 EDDC
+#+begin_src R :results none :noeval
+flights_EDDC %>%
+  autoplot(FLT_TOT_1)
+
+  ## fill_gaps() %>%
+  ## ACF(FLT_DEP_1) %>% autoplot()
+  ## gg_season(FLT_DEP_1)
+#+end_src
+
+#+CAPTION: STL Decomposition on EDDC
+#+begin_src R :results none :noeval
+flights_EDDC %>%
+  fill_gaps() %>%
+  replace_na(list(FLT_TOT_1 = 1)) %>%
+  model(stl = STL(FLT_TOT_1)) %>%
+  components() %>% autoplot()
+#+end_src
+
+** GIS
+#+CAPTION: Using raw =geom_polygon= creates a plot that can be spatially distorted.
+#+begin_src R :noeval
+world <- map_data("world")
+
+europe <- right_join(world, feats_state, by="region")
+
+ggplot(europe, aes(x = long, y = lat, group = group)) +
+  geom_polygon(aes(fill = trend_strength), color = "black")
+#+end_src
+
+** Forecast
+#+begin_src R :results none :noeval
+flights %>%
+  group_by(FLT_DATE) %>%
+  summarise(tot = sum(FLT_TOT_1)) %>%
+  mutate(FLT_DATE = as.Date(FLT_DATE)) %>%
+  as_tsibble(index = FLT_DATE) %>%
+  fill_gaps() %>%
+  model(trend_model = TSLM(tot ~ trend())) %>%
+  gg_tsresiduals()
+#+end_src
+
+Before COVID-19: 2016-01 -- 2020-02
+After COVID-19:  2020-04 -- 2022-05
+
+A linear model won't work well, since variables are collinear.
+
+#+begin_src R :results none :noeval
+flights %>%
+  group_by(FLT_DATE) %>%
+  summarise(tot = sum(FLT_TOT_1)) %>%
+  mutate(FLT_DATE = as.Date(FLT_DATE)) %>%
+  as_tsibble(index = FLT_DATE) %>%
+  filter_index(. ~ "2020-02") %>%
+  fill_gaps() %>%
+  model(trend_model = TSLM(tot ~ trend() + season())) %>%
+  ## augment() %>%
+  gg_tsresiduals()
+  ## features(.innov, ljung_box, lag = 10)
+
+#+end_src
+
+#+begin_src R :noeval
+TOT_sum %>%
+  filter_index("2020-04" ~ .) %>%
+  ## TODO forecast before pandemic, after pandemic, and overall
+  ## fill_gaps() %>%
+  model("During Pandemic" = ARIMA(box_cox(tot, lambda))) %>%
+  forecast(h = 180) %>%
+  autoplot(TOT_sum)
+#+end_src

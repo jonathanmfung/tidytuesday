@@ -1,0 +1,128 @@
+#+TITLE: Ferris Wheels
+#+DATE: 08/09/22
+#+AUTHOR: Jonathan Fung
+#+PROPERTY: header-args:R :session *tidytuesday*
+#+LATEX_CLASS: notes
+#+LATEX_HEADER: \usepackage{fontspec}
+#+LATEX_HEADER: \setmainfont[]{IBM Plex Sans}
+#+LATEX_HEADER: \setmonofont[]{Iosevka SS14}
+* Utils
+#+begin_src R
+assignContinent <- function (country) {
+  s <- switch(country,
+         "USA"="North America",
+         "Japan"="Asia",
+         "Tailand"="Asia",
+         "Iraq"="Asia",
+         "China"="Asia",
+         "Ireland"="Europe",
+         "UK"="Europe",
+         "Turkmenistan"="Asia",
+         "Italy"="Europe",
+         "UAE"="Asia",
+         "Malaysia"="Asia",
+         "France"="Europe",
+         "Finland"="Europe",
+         "Saudi Arabia"="Asia",
+         "Taiwan"="Asia",
+         "Phillippines"="Asia",
+         "Iran"="Asia",
+         "Russia"="Europe",
+         "Canada"="North America",
+         "S Korea"="Asia",
+         "Singapore"="Asia",
+         "Mexico"="North America",
+         "Georgia"="Europe",
+         "Dubai"="Asia",
+         "Australia"="Oceania",
+         "Austria"="Europe",
+         )
+  return(s)
+}
+#+end_src
+
+#+RESULTS:
+
+* Import
+#+begin_src R
+library(tidyverse)
+tuesdata <- tidytuesdayR::tt_load('2022-08-09')
+wheels <- tuesdata$wheels
+## can't use assignContinent in mutate for some reason
+wheels$continent <- sapply(wheels$country, assignContinent, USE.NAMES = FALSE)
+head(wheels[,1:7])
+#+end_src
+
+#+RESULTS:
+| 1 | 360 Pensacola Beach |    200 |       | 2012-07-03 | 2013-01-01 | USA     |
+| 2 | Amuran              |    303 | 199.8 | 2004-01-01 |            | Japan   |
+| 3 | Asiatique Sky       |    200 |   200 | 2012-12-15 |            | Tailand |
+| 4 | Aurora Wheel        |    295 |   272 |            |            | Japan   |
+| 5 | Baghdad Eye         |    180 |       | 2011-01-01 |            | Iraq    |
+| 6 | Beijing Great Wheel | 692.64 | 642.7 |            |            | China   |
+* Modify
+#+begin_src R :results none
+wheels_nums <- wheels %>%
+  select(height, diameter,
+         country, continent,
+         number_of_cabins, passengers_per_cabin, seating_capacity,
+         hourly_capacity, ride_duration_minutes, turns)
+wheels_nums <- wheels_nums %>%
+  ## include units
+  rename(pass_per_ride = seating_capacity, # equivalent to number_of_cabins * passengers_per_cabin
+         pass_per_cabin = passengers_per_cabin,
+         pass_per_hour = hourly_capacity, # equivalent to pass_per_ride / min_per_ride * 60
+         min_per_ride = ride_duration_minutes,
+         turns_per_ride = turns) %>%
+  mutate(circumference = pi * diameter,
+         clearance = height - diameter,
+         turns_per_min = turns_per_ride / min_per_ride,
+         passenger_density = pass_per_ride / circumference)
+
+## revenue_per_ride = ticket_cost_to_ride *
+## breakeven no rides = construction_cost / revenue_per_ride
+
+#+end_src
+
+#+begin_src R :results none
+wheels_nums %>%
+#  group_by(continent) %>%
+  ggplot(aes(x = height)) + geom_histogram() + facet_wrap(vars(continent))
+#+end_src
+
+#+begin_src R :results none
+wheels_nums %>%
+  ggplot(aes(x = turns_per_min, y = height)) + geom_point()
+#+end_src
+
+#+begin_src R :results none
+wheels_nums %>%
+  ggplot(aes(x = number_of_cabins, y = height)) + geom_point()
+#+end_src
+
+
+#+begin_src R :results none
+wheels_nums %>%
+  ggplot(aes(x = number_of_cabins, y = min_per_ride, color = log(pass_per_cabin))) +
+  geom_point() + facet_wrap(vars(continent))
+#+end_src
+
+
+#+begin_src R :results none
+wheels_nums_indep <- wheels_nums %>%
+  select(height, diameter,
+         country, continent,
+         pass_per_ride, min_per_ride, turns_per_ride)
+
+#+end_src
+
+#+begin_src R :results none
+wheels_nums_indep %>%
+  ggplot(aes(x = pass_per_ride, y = min_per_ride, color = continent)) + geom_point()
+#+end_src
+
+
+
+can try to animate distance traveled
+
+concentric circles that spiral around?

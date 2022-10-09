@@ -2,4 +2,4 @@ Playing around with [[https://github.com/rfordatascience/tidytuesday][tidytuesda
 
 * Showcase
 - [[file:20220712_flights/README.pdf][20220712 - Flights: Time Series, GIS]]
-- [[file:20220927_artistsusa/README.pdf][20220927 - Artists in the USA: Explortation GIS]]
+- [[file:20220927_artistsusa/README.pdf][20220927 - Artists in the USA: Imputation, Exploration, GIS]]

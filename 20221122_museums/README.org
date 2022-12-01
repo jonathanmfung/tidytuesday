@@ -1,0 +1,256 @@
+#+TITLE: Artists in the USA
+#+DATE: 09/27/22
+#+AUTHOR: Jonathan Fung
+#+PROPERTY: header-args:R :session *tidytuesday*
+#+OPTIONS: ^:nil
+#+LATEX_CLASS: notes
+#+LATEX_HEADER: \usepackage{fontspec}
+#+LATEX_HEADER: \setmainfont[]{IBM Plex Sans}
+#+LATEX_HEADER: \setmonofont[]{Iosevka SS14}
+
+#+begin_latex
+\pagebreak
+#+end_latex
+* Import
+Source: [[https://github.com/rfordatascience/tidytuesday/tree/master/data/2022/2022-11-22][tidytuesday - November 22, 2022]]
+
+#+begin_src R :exports both :results none
+library(tidyverse)
+library(fpp3)
+
+tuesdata <- tidytuesdayR::tt_load('2022-11-22')
+museums <- tuesdata$museums
+#+end_src
+* Utils
+#+begin_src R :results none
+year_point <- function(yr_range) {
+  yrs_str <- strsplit(yr_range, ':')[[1]]
+  yrs_int <- sapply(yrs_str, strtoi)
+  if (yrs_int[[1]] == 9999) {
+    return("2022")
+  }
+  else if
+    (yrs_int[[1]] == yrs_int[[2]]) {
+    return(yrs_str[[1]])
+  } else {
+    return(paste(floor(mean(yrs_int))))
+  }
+}
+
+yrstr_to_yrdate <- function(string) {
+  return(as_date(string, format="%Y") %>%
+         floor_date("year") %>%
+         year())
+}
+
+gen_category <- function(string) {
+  strsplit(string, '-')[[1]][1]
+}
+#+end_src
+* Explore
+
+#+begin_src R :results none :exports code
+df <- museums
+df$yr_beg <- sapply(df$Year_opened, year_point, USE.NAMES = FALSE)
+df$yr_end <- sapply(df$Year_closed, year_point, USE.NAMES = FALSE)
+df$Subject_Matter_gen = sapply(df$Subject_Matter, gen_category, USE.NAMES = FALSE)
+df$Governance_gen = sapply(df$Governance, gen_category, USE.NAMES = FALSE)
+df <- df %>% mutate(yr_beg = yrstr_to_yrdate(yr_beg),
+                    yr_end = yrstr_to_yrdate(yr_end))
+## yr_end == 2022: never closed
+## study ended in Sept 2021
+#+end_src
+
+#+begin_src R :results graphics file :file media/timeline.png :width 700 :height 1200 :res 100 :exports both
+df %>%
+  select(yr_beg, yr_end) %>%
+  group_by(yr_beg, yr_end) %>%
+  summarize(n = n(), .groups = "rowwise") %>%
+  ungroup() %>%
+  mutate(rn = row_number()) %>%
+  ggplot(aes(y = rn,
+             xmin = yr_beg, xmax = yr_end,
+             color = cut(n,
+                         breaks = c(-Inf, 0, 1,2,3, 4, 5, 10, Inf),
+                         labels = c('0','1','2','3','4','5','>5','>10')))) +
+  geom_linerange() + scale_y_reverse() +
+  ggtitle("Museum Lifespans") + xlab("Year") +
+  scale_color_brewer("Number of Museums",
+                     palette = "Accent") +
+  theme(legend.position = c(0.4,0.5),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.y = element_blank())
+#+end_src
+
+#+RESULTS:
+[[file:media/timeline.png]]
+
+
+#+begin_src R :results none :exports code
+## counting number of open museums per year
+
+# min(df$yr_beg) == "1621-01-01"
+## use midpoint as 1850
+## yr_range <- seq(ymd('1850-01-01'), ymd('2022-01-01'), by = 'years')
+yr_range <- seq(year('1900-01-01'), year('2022-01-01'))
+betweens <- sapply(yr_range,
+                   \(yr)
+                   map2_lgl(df$yr_beg, df$yr_end, ~ between(yr,.x,.y))
+)
+
+colnames(betweens) <- paste(yr_range)
+
+df_years <- cbind(df, betweens)
+#+end_src
+
+
+Government and Independent are most of the market by a long-shot.
+#+begin_src R :results graphics file :file media/gov_trend.png :width 700 :height 800 :res 100 :exports both
+## Size, Governance, Governance_gen, DOMUS_Subject_Matter, Subject_Matter_gen
+VAR <- "Governance_gen"
+
+ts <- df_years %>%
+  group_by(!!sym(VAR)) %>%
+  summarize(across("1900":last_col(), sum))
+
+pivot_longer(ts, !(sym(VAR)), values_to = "count") %>%
+  mutate(date = yrstr_to_yrdate(name)) %>%
+  as_tsibble(index = date, key = sym(VAR)) %>%
+  autoplot(count) +
+  theme(legend.position = c(0.2,0.5))
+#+end_src
+
+#+RESULTS:
+[[file:media/gov_trend.png]]
+
+
+- 1930-1935 :: The Great Depression
+- 1979-1990 :: Prime Minister Margaret Thatcher.
+- 2020 :: Start of the COVID-19 Pandemic.
+#+begin_src R :results graphics file :file media/per_year.png :width 700 :height 1000 :res 100 :exports both
+highlight <- function(xleft, xright) {
+  return(annotate("rect", xmin = xleft, xmax = xright,
+           ymin = -20, ymax = -5,
+           fill = "blue", alpha = 0.2))
+}
+
+beg <- df %>%
+  ggplot(aes(x = yr_beg, color = Governance_gen)) +
+  geom_freqpoly(binwidth = 1) +
+  highlight(1979, 1990) +
+  highlight(1930, 1935) +
+  highlight(2019.5, 2020.5) +
+  coord_cartesian(ylim = c(0,210)) +
+  scale_x_continuous(limits = c(1900, 2025),
+                     breaks = seq(1900, 2025, by = 25)) +
+  scale_y_continuous(breaks = seq(0,210, by = 30)) +
+  ggtitle("Museum Openings and Closings per Year",
+          subtitle = "By Governance type") +
+  ylab("Openings per Year") +
+  theme(legend.position = c(0.2,0.5),
+        axis.title.x = element_blank(),
+        axis.text.x = element_text(margin = margin(t = 8, b = -4)),
+        plot.title = element_text(hjust = 0.5, size = 20),
+        plot.subtitle = element_text(hjust = 0.5, size = 16))
+
+end <- df %>%
+  ## yr_end == 2022 means museum is still open
+  filter(yr_end != 2022) %>%
+  ggplot(aes(x = yr_end, color = Governance_gen)) +
+  geom_freqpoly(binwidth = 1) +
+  coord_cartesian(xlim = c(1899,2025), ylim = c(30,0)) +
+  scale_y_reverse(breaks = seq(0,30, by = 10))  +
+  scale_x_continuous(breaks = seq(1900, 2025, by = 25),
+                     position = "top") +
+  ylab("Closings per Year") +
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.ticks.x.bottom = element_blank(),
+        axis.text.x = element_blank())
+
+gridExtra::grid.arrange(beg, end,
+                        layout_matrix = rbind(1,1,1,1,1,1,1,2))
+#+end_src
+
+#+RESULTS:
+[[file:media/per_year.png]]
+
+* GIS
+#+begin_src R :results none
+library(rnaturalearth)
+uk_states <- ne_states(country = 'united kingdom',
+                   returnclass = "sf")
+uk_countries <- ne_countries(country = 'united kingdom',
+                     type = 'map_units',
+                    scale = "large",
+                    returnclass = "sf")
+#+end_src
+
+
+#+begin_src R :results graphics file :file media/gis.png :width 700 :height 1000 :res 100 :exports both
+ggplot(uk_countries, aes()) +
+  geom_sf() +
+  coord_sf(xlim = c(-8, 1.75), ylim = c(50, 60.5)) +
+  geom_point(data = museums, aes(x = Longitude, y = Latitude), color = "darkred", alpha =  0.3) +
+  geom_density2d_filled(data = museums, aes(x = Longitude, y = Latitude), alpha = 0.3, contour_var = "count") +
+  geom_density2d(data = museums, aes(x = Longitude, y = Latitude), alpha = 1) +
+  theme(legend.position = "none")
+#+end_src
+
+#+RESULTS:
+[[file:media/gis.png]]
+
+* Excess :noexport
+** Explore
+#+begin_src R :results none :noeval
+## Not this one, too messy
+## Subject_Matter_gen of faceted on Governance_gen
+
+df_years %>%
+  filter(Governance_gen == c("Government", "Independent")) %>%
+  group_by(Governance_gen, Subject_Matter_gen) %>%
+  summarize(across("1900":last_col(), sum)) %>%
+  pivot_longer(cols = !c(Subject_Matter_gen, Governance_gen), values_to="count") %>%
+  mutate(date = yrstr_to_yrdate(name)) %>%
+  as_tsibble(index = date, key = c(Subject_Matter_gen, Governance_gen)) %>%
+  autoplot(count, aes(color = Subject_Matter_gen)) +
+  facet_wrap(vars(Governance_gen)) +
+  theme(legend.position="none")## + scale_y_continuous(trans = "pseudo_log")
+
+#+end_src
+
+figure out when reversal occurs?
+#+begin_src R :results none :noeval
+## not this one
+pivot_longer(ts, !(sym(VAR)), values_to = "count") %>%
+  mutate(date = strtoi(name)) %>%
+  as_tsibble(index = date, key = sym(VAR)) %>% ACF(count, lag_max = 65) %>% filter(abs(acf) < 0.01)
+#+end_src
+
+Huge
+#+begin_src R :results none
+museums %>% filter(Size == "huge")
+museums %>% filter(Size == "huge") %>% select(Year_opened, Year_closed)
+#+end_src
+
+** Deprivation
+prob not this
+#+begin_src R :results output :noeval
+df %>%
+  select(starts_with("Area_Deprivation_index")) %>%
+  na.omit() %>%
+  prcomp() %>%
+  summary
+#+end_src
+
+#+RESULTS:
+: Importance of components:
+:                           PC1    PC2    PC3     PC4     PC5     PC6    PC7
+: Standard deviation     5.9016 3.1630 2.7668 2.03990 1.53257 1.28100 0.7011
+: Proportion of Variance 0.5669 0.1629 0.1246 0.06774 0.03823 0.02671 0.0080
+: Cumulative Proportion  0.5669 0.7298 0.8544 0.92216 0.96039 0.98710 0.9951
+:                            PC8
+: Standard deviation     0.54836
+: Proportion of Variance 0.00489
+: Cumulative Proportion  1.00000
